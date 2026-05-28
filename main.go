@@ -8,11 +8,13 @@ import (
 	"unicode"
 )
 
+// Pair struct represent a key/value pair (k, v)
 type Pair struct {
 	key   string
 	value int
 }
 
+// Map function produces a key/value pair for each input data.
 func Map(data string) Pair {
 	return Pair{
 		key:   data,
@@ -20,6 +22,7 @@ func Map(data string) Pair {
 	}
 }
 
+// Reduce function takes a key and a list of values and produces a single output value.
 func Reduce(key string, values []int) Pair {
 	sum := 0
 	for _, v := range values {
@@ -49,45 +52,34 @@ func main() {
 	pairChan := make(chan Pair)
 
 	reducer := 3
-	reducerChan := make([]chan Pair, reducer)
 
 	entries, err := os.ReadDir("data")
 	if err != nil {
 		fmt.Println("Error reading directory.")
 		return
 	}
+	os.RemoveAll("intermediate")
+	os.Mkdir("intermediate", 0o755)
 
 	// Shuffle, grouping, and reduce
 
 	partitionWg.Add(1)
-	reducerWg.Add(reducer)
-
-	for i := range reducer {
-		reducerChan[i] = make(chan Pair)
-		ch := reducerChan[i]
-		go func(ch chan Pair) {
-			defer reducerWg.Done()
-			grouped := make(map[string][]int)
-
-			for pair := range ch {
-				grouped[pair.key] = append(grouped[pair.key], pair.value)
-			}
-
-			for key, value := range grouped {
-				result := Reduce(key, value)
-				fmt.Printf("(%s, %d)\n", result.key, result.value)
-			}
-		}(ch)
-	}
 
 	go func() {
 		defer partitionWg.Done()
 		for pair := range pairChan {
-			partition := int(Hash(pair.key)) % reducer
-			reducerChan[partition] <- pair
-		}
-		for _, ch := range reducerChan {
-			close(ch)
+			partition := int(hash(pair.key)) % reducer
+			filename := fmt.Sprintf("intermediate/partition_%d", partition)
+			f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+			if err != nil {
+				fmt.Println("Error opening file.")
+				return
+			}
+			if _, err := fmt.Fprintf(f, "%s,%d\n", pair.key, pair.value); err != nil {
+				fmt.Println("Error writing to file.")
+				return
+			}
+			f.Close()
 		}
 	}()
 
@@ -124,10 +116,15 @@ func main() {
 	}
 
 	mapWg.Wait()
+	// after all the mappers are done, we can close the pairChan to signal the partitioner that there are no more pairs to process
 	close(pairChan)
 
+	// Wait for partitioning and reducing to finish
 	partitionWg.Wait()
-	reducerWg.Wait()
+	reducerWg.Add(reducer)
 
-	// Reduce
+	for i := range reducer {
+		go reducerWorker(i, &reducerWg)
+	}
+	reducerWg.Wait()
 }
