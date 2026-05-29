@@ -16,6 +16,19 @@ func hash(s string) uint32 {
 	return h.Sum32()
 }
 
+func mapperWorker(
+	tasks <-chan MapTask,
+	pairChan chan<- Pair,
+	wg *sync.WaitGroup,
+) {
+	for task := range tasks {
+		for _, word := range task.Words {
+			pairChan <- Map(word)
+		}
+		wg.Done()
+	}
+}
+
 func reducerWorker(id int, wg *sync.WaitGroup) {
 	defer wg.Done()
 

@@ -14,6 +14,10 @@ type Pair struct {
 	value int
 }
 
+type MapTask struct {
+	Words []string
+}
+
 // Map function produces a key/value pair for each input data.
 func Map(data string) Pair {
 	return Pair{
@@ -46,11 +50,15 @@ func chunker(words []string, chunkSize int) [][]string {
 
 func main() {
 	var chunks [][]string
+
 	var mapWg sync.WaitGroup
 	var partitionWg sync.WaitGroup
 	var reducerWg sync.WaitGroup
-	pairChan := make(chan Pair)
 
+	pairChan := make(chan Pair)
+	mapTask := make(chan MapTask)
+
+	workerCount := 4
 	reducer := 3
 
 	entries, err := os.ReadDir("data")
@@ -63,10 +71,7 @@ func main() {
 
 	// Shuffle, grouping, and reduce
 
-	partitionWg.Add(1)
-
-	go func() {
-		defer partitionWg.Done()
+	partitionWg.Go(func() {
 		for pair := range pairChan {
 			partition := int(hash(pair.key)) % reducer
 			filename := fmt.Sprintf("intermediate/partition_%d", partition)
@@ -81,7 +86,11 @@ func main() {
 			}
 			f.Close()
 		}
-	}()
+	})
+
+	for range workerCount {
+		go mapperWorker(mapTask, pairChan, &mapWg)
+	}
 
 	for _, entry := range entries {
 		path := "data/" + entry.Name()
@@ -106,15 +115,13 @@ func main() {
 
 		for _, chunk := range chunks {
 			mapWg.Add(1)
-			go func(chunk []string) {
-				defer mapWg.Done()
-				for _, word := range chunk {
-					pairChan <- Map(word)
-				}
-			}(chunk)
+			mapTask <- MapTask{
+				Words: chunk,
+			}
 		}
 	}
 
+	close(mapTask)
 	mapWg.Wait()
 	// after all the mappers are done, we can close the pairChan to signal the partitioner that there are no more pairs to process
 	close(pairChan)
