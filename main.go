@@ -8,16 +8,6 @@ import (
 	"unicode"
 )
 
-// Pair struct represent a key/value pair (k, v)
-type Pair struct {
-	key   string
-	value int
-}
-
-type MapTask struct {
-	Words []string
-}
-
 // Map function produces a key/value pair for each input data.
 func Map(data string) Pair {
 	return Pair{
@@ -58,7 +48,29 @@ func main() {
 	pairChan := make(chan Pair)
 	mapTask := make(chan MapTask)
 
+	doneChan := make(chan TaskResult)
+
+	go func() {
+		for result := range doneChan {
+			fmt.Printf(
+				"task %d completed by worker %d\n",
+				result.TaskID,
+				result.WorkerID,
+			)
+		}
+	}()
+
 	workerCount := 4
+
+	workers := make([]Worker, workerCount)
+
+	for i := range workers {
+		workers[i] = Worker{
+			ID:    i,
+			State: Idle,
+		}
+	}
+
 	reducer := 3
 
 	entries, err := os.ReadDir("data")
@@ -88,8 +100,9 @@ func main() {
 		}
 	})
 
-	for range workerCount {
-		go mapperWorker(mapTask, pairChan, &mapWg)
+	for i := range workerCount {
+		w := Worker{ID: i}
+		go mapperWorker(w, mapTask, pairChan, doneChan, &mapWg)
 	}
 
 	for _, entry := range entries {
@@ -113,9 +126,10 @@ func main() {
 
 		// Mapping
 
-		for _, chunk := range chunks {
+		for i, chunk := range chunks {
 			mapWg.Add(1)
 			mapTask <- MapTask{
+				ID:    i,
 				Words: chunk,
 			}
 		}

@@ -17,14 +17,22 @@ func hash(s string) uint32 {
 }
 
 func mapperWorker(
+	w Worker,
 	tasks <-chan MapTask,
 	pairChan chan<- Pair,
+	doneChan chan<- TaskResult,
 	wg *sync.WaitGroup,
 ) {
 	for task := range tasks {
 		for _, word := range task.Words {
 			pairChan <- Map(word)
 		}
+
+		doneChan <- TaskResult{
+			TaskID:   task.ID,
+			WorkerID: w.ID,
+		}
+
 		wg.Done()
 	}
 }
