@@ -46,30 +46,15 @@ func main() {
 	var reducerWg sync.WaitGroup
 
 	pairChan := make(chan Pair)
-	mapTask := make(chan MapTask)
 
-	doneChan := make(chan TaskResult)
-
-	go func() {
-		for result := range doneChan {
-			fmt.Printf(
-				"task %d completed by worker %d\n",
-				result.TaskID,
-				result.WorkerID,
-			)
-		}
-	}()
+	master := Master{
+		MapTasks: make(map[int]*MapTask),
+		Workers:  make(map[int]*Worker),
+	}
 
 	workerCount := 4
 
-	workers := make([]Worker, workerCount)
-
-	for i := range workers {
-		workers[i] = Worker{
-			ID:    i,
-			State: Idle,
-		}
-	}
+	// workers := make([]Worker, workerCount)
 
 	reducer := 3
 
@@ -101,9 +86,16 @@ func main() {
 	})
 
 	for i := range workerCount {
-		w := Worker{ID: i}
-		go mapperWorker(w, mapTask, pairChan, doneChan, &mapWg)
+		master.mu.Lock()
+		master.Workers[i] = &Worker{
+			ID:    i,
+			State: Idle,
+		}
+		master.mu.Unlock()
+		go master.mapperWorker(Worker{ID: i}, pairChan, &mapWg)
 	}
+
+	taskID := 0
 
 	for _, entry := range entries {
 		path := "data/" + entry.Name()
@@ -126,16 +118,21 @@ func main() {
 
 		// Mapping
 
-		for i, chunk := range chunks {
+		for _, chunk := range chunks {
 			mapWg.Add(1)
-			mapTask <- MapTask{
-				ID:    i,
+			task := &MapTask{
+				ID:    taskID,
+				State: Pending,
+
 				Words: chunk,
 			}
+			master.mu.Lock()
+			master.MapTasks[taskID] = task
+			master.mu.Unlock()
+			taskID++
 		}
 	}
 
-	close(mapTask)
 	mapWg.Wait()
 	// after all the mappers are done, we can close the pairChan to signal the partitioner that there are no more pairs to process
 	close(pairChan)
@@ -145,7 +142,7 @@ func main() {
 	reducerWg.Add(reducer)
 
 	for i := range reducer {
-		go reducerWorker(i, &reducerWg)
+		go master.reducerWorker(i, &reducerWg)
 	}
 	reducerWg.Wait()
 }

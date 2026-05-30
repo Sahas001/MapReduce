@@ -16,28 +16,25 @@ func hash(s string) uint32 {
 	return h.Sum32()
 }
 
-func mapperWorker(
+func (m *Master) mapperWorker(
 	w Worker,
-	tasks <-chan MapTask,
 	pairChan chan<- Pair,
-	doneChan chan<- TaskResult,
 	wg *sync.WaitGroup,
 ) {
-	for task := range tasks {
+	for {
+		task := m.RequestMapTask(w.ID)
+		if task == nil {
+			return
+		}
 		for _, word := range task.Words {
 			pairChan <- Map(word)
 		}
-
-		doneChan <- TaskResult{
-			TaskID:   task.ID,
-			WorkerID: w.ID,
-		}
-
+		m.MapTaskCompleted(task.ID, w.ID)
 		wg.Done()
 	}
 }
 
-func reducerWorker(id int, wg *sync.WaitGroup) {
+func (m *Master) reducerWorker(id int, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	grouped := make(map[string][]int)
@@ -72,4 +69,26 @@ func reducerWorker(id int, wg *sync.WaitGroup) {
 
 		fmt.Printf("(%s, %d)\n", result.key, result.value)
 	}
+}
+
+func (m *Master) RequestMapTask(workerID int) *MapTask {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, task := range m.MapTasks {
+		if task.State == Pending {
+			task.State = Running
+			m.Workers[workerID].State = Busy
+			return task
+		}
+	}
+
+	return nil
+}
+
+func (m *Master) MapTaskCompleted(taskID, workerID int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.MapTasks[taskID].State = Completed
+	m.Workers[workerID].State = Idle
 }

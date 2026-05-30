@@ -1,12 +1,6 @@
 package main
 
-// Pair struct represent a key/value pair (k, v)
-type Pair struct {
-	key   string
-	value int
-}
-
-type TaskState int
+import "sync"
 
 const (
 	Pending TaskState = iota
@@ -14,25 +8,47 @@ const (
 	Completed
 )
 
-type MapTask struct {
-	ID    int
-	Words []string
-	State TaskState
-}
-
-type WorkerState int
-
 const (
 	Idle WorkerState = iota
 	Busy
 )
+
+// Pair struct represent a key/value pair (k, v)
+type Pair struct {
+	key   string
+	value int
+}
+
+type Master struct {
+	mu          sync.Mutex
+	MapTasks    map[int]*MapTask
+	ReduceTasks map[int]*ReduceTask
+	Workers     map[int]*Worker
+}
+
+type (
+	TaskState   int
+	WorkerState int
+)
+
+type MapTask struct {
+	ID    int
+	State TaskState
+	Words []string
+}
+
+type ReduceTask struct {
+	ID        int
+	State     TaskState
+	Partition int
+}
 
 type Worker struct {
 	ID    int
 	State WorkerState
 }
 
-type TaskResult struct {
+type Task struct {
 	TaskID   int
 	WorkerID int
 }
