@@ -128,6 +128,11 @@ func (m *Master) RequestTask(workerID int) Task {
 			return Task{task.ID, ReduceTaskType}
 		}
 	}
+	for _, task := range m.ReduceTasks {
+		if task.State != Completed {
+			return Task{Type: WaitTaskType}
+		}
+	}
 
 	return Task{Type: ExitTaskType}
 }
