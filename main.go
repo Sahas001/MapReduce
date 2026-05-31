@@ -41,9 +41,8 @@ func chunker(words []string, chunkSize int) [][]string {
 func main() {
 	var chunks [][]string
 
-	var mapWg sync.WaitGroup
 	var partitionWg sync.WaitGroup
-	var reducerWg sync.WaitGroup
+	var workerWg sync.WaitGroup
 
 	pairChan := make(chan Pair)
 
@@ -53,10 +52,9 @@ func main() {
 	}
 
 	workerCount := 4
+	reducerCount := 3
 
-	// workers := make([]Worker, workerCount)
-
-	reducer := 3
+	workerWg.Add(workerCount)
 
 	entries, err := os.ReadDir("data")
 	if err != nil {
@@ -70,7 +68,7 @@ func main() {
 
 	partitionWg.Go(func() {
 		for pair := range pairChan {
-			partition := int(hash(pair.key)) % reducer
+			partition := int(hash(pair.key)) % reducerCount
 			filename := fmt.Sprintf("intermediate/partition_%d", partition)
 			f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 			if err != nil {
@@ -84,16 +82,6 @@ func main() {
 			f.Close()
 		}
 	})
-
-	for i := range workerCount {
-		master.mu.Lock()
-		master.Workers[i] = &Worker{
-			ID:    i,
-			State: Idle,
-		}
-		master.mu.Unlock()
-		go master.mapperWorker(Worker{ID: i}, pairChan, &mapWg)
-	}
 
 	taskID := 0
 
@@ -119,31 +107,28 @@ func main() {
 		// Mapping
 
 		for _, chunk := range chunks {
-			mapWg.Add(1)
 			task := &MapTask{
 				ID:    taskID,
 				State: Pending,
 
 				Words: chunk,
 			}
-			master.mu.Lock()
 			master.MapTasks[taskID] = task
-			master.mu.Unlock()
 			taskID++
 		}
 	}
-
-	mapWg.Wait()
-	// after all the mappers are done, we can close the pairChan to signal the partitioner that there are no more pairs to process
-	close(pairChan)
-
-	// Wait for partitioning and reducing to finish
-	partitionWg.Wait()
-	reducerWg.Add(reducer)
+	for i := range workerCount {
+		master.mu.Lock()
+		master.Workers[i] = &Worker{
+			ID:    i,
+			State: Idle,
+		}
+		master.mu.Unlock()
+		go master.worker(Worker{ID: i}, pairChan, &workerWg)
+	}
 
 	master.ReduceTasks = make(map[int]*ReduceTask)
-
-	for i := range reducer {
+	for i := range reducerCount {
 		master.ReduceTasks[i] = &ReduceTask{
 			ID:        i,
 			State:     Pending,
@@ -151,8 +136,10 @@ func main() {
 		}
 	}
 
-	for i := range reducer {
-		go master.reducerWorker(Worker{ID: i}, &reducerWg)
-	}
-	reducerWg.Wait()
+	workerWg.Wait()
+	// after all the mappers are done, we can close the pairChan to signal the partitioner that there are no more pairs to process
+	close(pairChan)
+
+	// Wait for partitioning and reducing to finish
+	partitionWg.Wait()
 }

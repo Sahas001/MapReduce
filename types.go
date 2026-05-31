@@ -48,7 +48,16 @@ type Worker struct {
 	State WorkerState
 }
 
+type TaskType int
+
+const (
+	MapTaskType TaskType = iota
+	ReduceTaskType
+	WaitTaskType
+	ExitTaskType
+)
+
 type Task struct {
-	TaskID   int
-	WorkerID int
+	TaskID int
+	Type   TaskType
 }
