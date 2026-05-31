@@ -141,8 +141,18 @@ func main() {
 	partitionWg.Wait()
 	reducerWg.Add(reducer)
 
+	master.ReduceTasks = make(map[int]*ReduceTask)
+
 	for i := range reducer {
-		go master.reducerWorker(i, &reducerWg)
+		master.ReduceTasks[i] = &ReduceTask{
+			ID:        i,
+			State:     Pending,
+			Partition: i,
+		}
+	}
+
+	for i := range reducer {
+		go master.reducerWorker(Worker{ID: i}, &reducerWg)
 	}
 	reducerWg.Wait()
 }
